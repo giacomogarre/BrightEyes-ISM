@@ -3,6 +3,7 @@ import scipy.signal as sgn
 from PyFocus.custom_mask_functions import generate_incident_field, custom_mask_focus_field_XY, plot_in_cartesian
 from poppy.zernike import noll_indices, R, zern_name
 import copy as cp
+from skimage.transform import rotate
 
 #%% Zernike
 
@@ -336,11 +337,11 @@ def Pinholes(N, Nx, pxsizex, M, pxpitch, pxdim):
     
     p = np.zeros((Nx, Nx, N*N))
     center = Nx//2
-    sizeDet = int(pxdim / M / pxsizex)
+    sizeDet = int( np.round(pxdim / M / pxsizex) )
     if np.mod(sizeDet, 2) == 0:
         sizeDet -= 1 # let this be odd
     sizeDet = np.max((sizeDet, 1))
-    stepDet = int(pxpitch / M / pxsizex)
+    stepDet = int( np.round(pxpitch / M / pxsizex) )
     startcoord = int(np.ceil(center - np.floor(N/2) * stepDet - 0.5 * sizeDet))
 
     i = 0
@@ -355,7 +356,7 @@ def Pinholes(N, Nx, pxsizex, M, pxpitch, pxdim):
 
     return p
 
-def SPAD_PSF_2D(N, Nx, pxpitch, pxdim, pxsizex, M, exPar, emPar, stedPar = None, z_shift=0, spad = None, return_entrance_field = False):
+def SPAD_PSF_2D(N, Nx, pxpitch, pxdim, pxsizex, M, exPar, emPar, RotParam = None, stedPar = None, z_shift=0, spad = None, return_entrance_field = False):
     """
     Calculate PSFs for all pixels of the SPAD array by using FFTs
 
@@ -423,17 +424,34 @@ def SPAD_PSF_2D(N, Nx, pxpitch, pxdim, pxsizex, M, exPar, emPar, stedPar = None,
         donut *= stedPar.sted_sat/np.max(donut)
         stedPSF = np.exp( - donut * stedPar.sted_pulse / stedPar.sted_tau )
         exPSF *= stedPSF
+        
+    # Rotate and mirror detPSF
+    
+    if RotParam is None:
+        detPSFrot = detPSF
+    else:
+        detPSFrot = detPSF.copy()
+        
+        theta = RotParam[1]*180/np.pi
+        mirror = RotParam[2]
+    
+        if mirror == -1:
+           detPSFrot = detPSFrot.reshape(Nx,Nx,N,N)
+           detPSFrot = np.flip(detPSFrot, axis=-1)
+           detPSFrot = detPSFrot.reshape(Nx,Nx,N**2)
+        
+        detPSFrot = rotate(detPSFrot, theta, resize=False, center=None, order=None, mode ='constant', cval=0, clip=True, preserve_range=False)
     
     # Calculate total PSF
     
-    PSF = np.einsum('ijk, ij -> ijk', detPSF, exPSF)
+    PSF = np.einsum('ijk, ij -> ijk', detPSFrot, exPSF)
     
     if return_entrance_field == True:
-        return PSF, detPSF, exPSF, ex_fields, em_fields
+        return PSF, detPSFrot, exPSF, ex_fields, em_fields
     else:
-        return PSF, detPSF, exPSF
+        return PSF, detPSFrot, exPSF
     
-def SPAD_PSF_3D(N, Nx, pxpitch, pxdim, pxsizex, M, exPar, emPar, Nz, pxsizez, stedPar = None, spad = None, stack: str = 'symmetrical'):
+def SPAD_PSF_3D(N, Nx, pxpitch, pxdim, pxsizex, M, exPar, emPar, Nz, pxsizez, RotParam = None, stedPar = None, spad = None, stack: str = 'symmetrical'):
     """
     It calculates a z-stack of PSFs for all the elements of the SPAD array detector.
 
@@ -496,7 +514,7 @@ def SPAD_PSF_3D(N, Nx, pxpitch, pxdim, pxsizex, M, exPar, emPar, Nz, pxsizez, st
     
     for i, z in enumerate(zeta):
         print( f'Calculating the PSFs at z = {z} nm')
-        PSF[i, :, :, :], detPSF[i, :, :, :], exPSF[i, :, :] = SPAD_PSF_2D(N, Nx, pxpitch, pxdim, pxsizex, M, exPar, emPar, stedPar = stedPar, z_shift = z, spad = spad)
+        PSF[i, :, :, :], detPSF[i, :, :, :], exPSF[i, :, :] = SPAD_PSF_2D(N, Nx, pxpitch, pxdim, pxsizex, M, exPar, emPar, RotParam = RotParam, stedPar = stedPar, z_shift = z, spad = spad)
         
     return PSF, detPSF, exPSF
 
